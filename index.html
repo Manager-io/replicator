@@ -59,11 +59,6 @@
         }
         label.entity:last-child { border-bottom: none; }
         label.entity input { margin-right: 10px; }
-        label.entity .entity-desc {
-            color: var(--muted);
-            font-size: 12px;
-            margin-left: auto;
-        }
         .business-row {
             display: flex;
             gap: 16px;
@@ -101,24 +96,91 @@
             font-size: 12px;
             margin-top: 8px;
         }
-        #log {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            font-size: 12px;
-            background: #0f172a;
-            color: #e2e8f0;
-            border-radius: 6px;
-            padding: 12px;
-            min-height: 200px;
-            max-height: 400px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-        #log .ok { color: #4ade80; }
-        #log .err { color: #f87171; }
-        #log .info { color: #93c5fd; }
-        #log .muted { color: #94a3b8; }
         .hidden { display: none !important; }
+
+        /* Progress visualization */
+        #progress { margin-top: 16px; }
+        .overall {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .overall-bar {
+            flex: 1;
+            height: 10px;
+            background: #e5e7eb;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+        .overall-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--accent);
+            border-radius: 999px;
+            transition: width 0.3s ease;
+        }
+        .overall-fill.done { background: var(--ok); }
+        .overall-fill.failed { background: var(--err); }
+        .overall-text {
+            font-size: 13px;
+            color: var(--muted);
+            white-space: nowrap;
+            min-width: 110px;
+            text-align: right;
+        }
+        .entity-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .entity-row:last-child { border-bottom: none; }
+        .entity-row .name {
+            font-weight: 600;
+            min-width: 160px;
+        }
+        .entity-row .status-text {
+            color: var(--muted);
+            font-size: 13px;
+            flex: 1;
+        }
+        .entity-row .status-text.err { color: var(--err); }
+        .entity-row .status-text.ok { color: var(--ok); }
+        .status-icon {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            color: white;
+            flex-shrink: 0;
+        }
+        .status-icon.pending {
+            background: transparent;
+            border: 2px solid #d1d5db;
+        }
+        .status-icon.active {
+            border: 2px solid #dbeafe;
+            border-top-color: var(--accent);
+            background: transparent;
+            animation: spin 0.9s linear infinite;
+        }
+        .status-icon.done { background: var(--ok); }
+        .status-icon.failed { background: var(--err); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .summary {
+            margin-top: 16px;
+            padding: 12px 14px;
+            border-radius: 6px;
+            font-weight: 600;
+        }
+        .summary.ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+        .summary.err { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
     </style>
 </head>
 <body>
@@ -128,11 +190,11 @@
     <div class="card">
         <h2><span class="step-number">1</span>What do you want to copy?</h2>
         <div id="entities">
-            <label class="entity"><input type="checkbox" value="customer"> Customers <span class="entity-desc">/api4/customer</span></label>
-            <label class="entity"><input type="checkbox" value="supplier"> Suppliers <span class="entity-desc">/api4/supplier</span></label>
-            <label class="entity"><input type="checkbox" value="employee"> Employees <span class="entity-desc">/api4/employee</span></label>
-            <label class="entity"><input type="checkbox" value="inventory-item"> Inventory items <span class="entity-desc">/api4/inventory-item</span></label>
-            <label class="entity"><input type="checkbox" value="non-inventory-item"> Non-inventory items <span class="entity-desc">/api4/non-inventory-item</span></label>
+            <label class="entity"><input type="checkbox" value="customer"> Customers</label>
+            <label class="entity"><input type="checkbox" value="supplier"> Suppliers</label>
+            <label class="entity"><input type="checkbox" value="employee"> Employees</label>
+            <label class="entity"><input type="checkbox" value="inventory-item"> Inventory items</label>
+            <label class="entity"><input type="checkbox" value="non-inventory-item"> Non-inventory items</label>
         </div>
     </div>
 
@@ -154,7 +216,14 @@
     <div class="card">
         <h2><span class="step-number">3</span>Replicate</h2>
         <button id="runBtn" disabled>Start replication</button>
-        <div id="log" style="margin-top: 12px;"><span class="muted">Log output will appear here…</span></div>
+        <div id="progress" class="hidden">
+            <div class="overall">
+                <div class="overall-bar"><div class="overall-fill" id="overallFill"></div></div>
+                <div class="overall-text" id="overallText">0%</div>
+            </div>
+            <div id="entityList"></div>
+            <div id="summary" class="summary hidden"></div>
+        </div>
     </div>
 
     <script>
@@ -187,20 +256,63 @@
         const sourceSel = document.getElementById('source');
         const destSel = document.getElementById('destination');
         const runBtn = document.getElementById('runBtn');
-        const logEl = document.getElementById('log');
+        const progressEl = document.getElementById('progress');
+        const entityListEl = document.getElementById('entityList');
+        const overallFillEl = document.getElementById('overallFill');
+        const overallTextEl = document.getElementById('overallText');
+        const summaryEl = document.getElementById('summary');
         const warnEl = document.getElementById('sameBusinessWarning');
         const entityBoxes = Array.from(document.querySelectorAll('#entities input[type=checkbox]'));
 
-        function log(text, cls) {
-            const line = document.createElement('div');
-            if (cls) line.className = cls;
-            const ts = new Date().toLocaleTimeString();
-            line.textContent = `[${ts}] ${text}`;
-            logEl.appendChild(line);
-            logEl.scrollTop = logEl.scrollHeight;
+        const entityRows = {};
+
+        function resetProgress(selected) {
+            entityListEl.innerHTML = '';
+            summaryEl.className = 'summary hidden';
+            summaryEl.textContent = '';
+            overallFillEl.className = 'overall-fill';
+            overallFillEl.style.width = '0%';
+            overallTextEl.textContent = `0 of ${selected.length} done`;
+            progressEl.classList.remove('hidden');
+            for (const entity of selected) {
+                const def = ENTITY_DEFS[entity];
+                const row = document.createElement('div');
+                row.className = 'entity-row';
+                row.innerHTML = `
+                    <span class="status-icon pending"></span>
+                    <span class="name"></span>
+                    <span class="status-text">Waiting…</span>
+                `;
+                row.querySelector('.name').textContent = capitalize(def.label);
+                entityListEl.appendChild(row);
+                entityRows[entity] = row;
+            }
         }
 
-        function clearLog() { logEl.innerHTML = ''; }
+        function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+        function setEntityStatus(entity, state, text) {
+            const row = entityRows[entity];
+            if (!row) return;
+            const icon = row.querySelector('.status-icon');
+            const txt = row.querySelector('.status-text');
+            icon.className = 'status-icon ' + state;
+            icon.textContent = state === 'done' ? '✓' : state === 'failed' ? '✕' : '';
+            txt.className = 'status-text' + (state === 'failed' ? ' err' : state === 'done' ? ' ok' : '');
+            txt.textContent = text;
+        }
+
+        function updateOverall(done, total) {
+            const pct = total ? Math.round((done / total) * 100) : 0;
+            overallFillEl.style.width = pct + '%';
+            overallTextEl.textContent = `${done} of ${total} done`;
+        }
+
+        function setSummary(text, ok) {
+            summaryEl.className = 'summary ' + (ok ? 'ok' : 'err');
+            summaryEl.textContent = text;
+            overallFillEl.classList.add(ok ? 'done' : 'failed');
+        }
 
         function refreshRunButton() {
             const src = sourceSel.value;
@@ -241,7 +353,7 @@
             return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
 
-        async function fetchAllItems(entity, businessName) {
+        async function fetchAllItems(entity, businessName, onProgress) {
             const def = ENTITY_DEFS[entity];
             const all = [];
             let skip = 0;
@@ -258,6 +370,7 @@
                 });
                 const items = res?.items || [];
                 all.push(...items);
+                if (onProgress) onProgress(all.length);
                 if (items.length < PAGE_SIZE) break;
                 skip += PAGE_SIZE;
             }
@@ -276,61 +389,76 @@
 
         async function replicate() {
             runBtn.disabled = true;
-            clearLog();
             const source = sourceSel.value;
             const destination = destSel.value;
             const selected = entityBoxes.filter(cb => cb.checked).map(cb => cb.value);
 
-            log(`Source: ${source}`, 'info');
-            log(`Destination: ${destination}`, 'info');
-            log(`Entities: ${selected.map(s => ENTITY_DEFS[s].label).join(', ')}`, 'info');
-            log('', 'muted');
+            resetProgress(selected);
 
-            let totalOk = 0, totalFail = 0;
+            let totalOk = 0, totalFail = 0, doneCount = 0, anyFailed = false;
 
             for (const entity of selected) {
                 const def = ENTITY_DEFS[entity];
-                log(`Reading ${def.label} from "${source}"…`, 'info');
                 let items;
                 try {
-                    items = await fetchAllItems(entity, source);
+                    setEntityStatus(entity, 'active', `Reading from "${source}"…`);
+                    items = await fetchAllItems(entity, source, (loaded) => {
+                        setEntityStatus(entity, 'active', `Reading from "${source}"… (${loaded} loaded)`);
+                    });
                 } catch (e) {
-                    log(`  ✗ Failed to read ${def.label}: ${e?.message || e}`, 'err');
+                    anyFailed = true;
+                    setEntityStatus(entity, 'failed', `Couldn't read from "${source}": ${e?.message || e}`);
+                    doneCount++;
+                    updateOverall(doneCount, selected.length);
                     continue;
                 }
-                log(`  Found ${items.length} ${def.label}.`, 'muted');
-                if (!items.length) continue;
+
+                if (!items.length) {
+                    setEntityStatus(entity, 'done', `Nothing to copy.`);
+                    doneCount++;
+                    updateOverall(doneCount, selected.length);
+                    continue;
+                }
 
                 // GET batch returns { key, item }; PUT batch expects { key, value }.
                 const values = items.map(it => ({ key: it.key, value: it.item }));
-                log(`  Writing ${values.length} ${def.label} to "${destination}"…`, 'info');
+                setEntityStatus(entity, 'active', `Writing ${values.length} to "${destination}"…`);
                 try {
                     const result = await putBatch(entity, values, destination);
                     if (result === true || result === 'true') {
                         totalOk += values.length;
-                        log(`  ${def.label}: ${values.length} copied.`, 'ok');
+                        setEntityStatus(entity, 'done', `Copied ${values.length} record${values.length === 1 ? '' : 's'}.`);
                     } else {
+                        anyFailed = true;
                         totalFail += values.length;
-                        const msg = result?.message || JSON.stringify(result);
-                        log(`  ✗ ${def.label} batch failed: ${msg}`, 'err');
+                        const msg = result?.message || 'Unknown error.';
+                        setEntityStatus(entity, 'failed', `Failed: ${msg}`);
                     }
                 } catch (e) {
+                    anyFailed = true;
                     totalFail += values.length;
-                    log(`  ✗ ${def.label} batch failed: ${e?.message || e}`, 'err');
+                    setEntityStatus(entity, 'failed', `Failed: ${e?.message || e}`);
                 }
+                doneCount++;
+                updateOverall(doneCount, selected.length);
             }
 
-            log('', 'muted');
-            log(`Done. ${totalOk} records copied, ${totalFail} failed.`, totalFail ? 'err' : 'ok');
+            const summary = anyFailed
+                ? `Finished with errors. ${totalOk} copied, ${totalFail} failed.`
+                : `All done. ${totalOk} record${totalOk === 1 ? '' : 's'} copied.`;
+            setSummary(summary, !anyFailed);
             refreshRunButton();
         }
 
         runBtn.addEventListener('click', () => {
-            replicate().catch(e => log(`Fatal error: ${e?.message || e}`, 'err'));
+            replicate().catch(e => {
+                progressEl.classList.remove('hidden');
+                setSummary(`Something went wrong: ${e?.message || e}`, false);
+                refreshRunButton();
+            });
         });
 
-        loadBusinesses().catch(e => {
-            log(`Failed to load businesses: ${e?.message || e}`, 'err');
+        loadBusinesses().catch(() => {
             sourceSel.innerHTML = '<option>Error loading</option>';
             destSel.innerHTML = '<option>Error loading</option>';
         });
